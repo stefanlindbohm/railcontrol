@@ -27,9 +27,7 @@ class P50XInterface
 	end
 
 	def locomotive(address, speed, direction, lights)
-		return if (address >= 1000)
-		address_low_bits = address & 0xFF
-		address_high_bits = address >> 8
+		address_bytes = locomotive_address_bytes(address)
 		option_bits = 0
 		#option_bits |= 0x01 if (options[:function1])
 		#option_bits |= 0x02 if (options[:function2])
@@ -40,13 +38,48 @@ class P50XInterface
 		option_bits |= 0x40 # always force, no reason holding up
 		#option_bits |= 0x80 # should be se it any of f1-f4 is to be changed
 
-		self.write("X\x80" << address_low_bits << address_high_bits << speed << option_bits)
+		self.write("X\x80" << address_bytes[0] << address_bytes[1] << speed << option_bits)
 		self.read(1)
 	end
 
 	def locomotive_status(address)
-		self.write("X\x84" << address << 0)
+		address_bytes = locomotive_address_bytes(address)
+		self.write("X\x84" << address_bytes[0] << address_bytes[1])
+		status = self.read_unless_initial_error_byte(4)
+		return { } if (status[0] > 0)
+		{
+			speed:     status[1],
+			direction: status[2] & 0x20 == 0x20 ? :forward : :reverse,
+			lights:    status[2] & 0x10 == 0x10
+		}
+	end
+
+	def locomotive_dispatch(address)
+		# i've got no idea what effect this has
+		address_bytes = locomotive_address_bytes(address)
+		self.write("X\x83" << address_bytes[0] << address_bytes[1])
 		self.read(1)
+	end
+
+	def locomotive_configuration(address)
+		address_bytes = locomotive_address_bytes(address)
+		self.write("X\x85" << address_bytes[0] << address_bytes[1])
+		response = self.read_unless_initial_error_byte(5)
+		return { } if (response[0] > 0)
+		protocol = case response[1]
+		    when 0
+			    :maerklin
+		    when 1
+			    :sx
+		    when 2
+			    :dcc
+		    when 3
+			    :fmz
+	    end
+		{
+			protocol: protocol,
+			speed_steps: response[2]
+		}
 	end
 
 	def turnout(address, color, active)
@@ -97,13 +130,46 @@ class P50XInterface
 				end
 			end
 		end
+		prepare_response(response)
+	end
+
+	def read_unless_initial_error_byte(length)
+		response = []
+		return response if length <= 0
+		while (response.length < length)
+			data = @port.read
+			if (data.length > 0)
+				data.each_byte do |byte|
+					response.push(byte)
+				end
+			end
+			if (response.length == 1 && response[0] > 0)
+				break;
+			end
+		end
+		prepare_response(response)
+	end
+
+	def prepare_response(response)
 		string = ""
 		response.each do |byte|
 			string += " 0x#{byte.to_s(16)}"
 		end
 		puts "<<#{string}"
-		return response[0] if length == 1
+		return response[0] if response.length == 1
 		return response
+	end
+
+	def locomotive_address_bytes(address)
+		return [ 0, 0 ] if address >= 1000
+		[
+			address & 0xFF,
+			address >> 8
+		]
+	end
+
+	def turnout_address_bytes(address)
+
 	end
 
 end

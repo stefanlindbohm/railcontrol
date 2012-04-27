@@ -1,15 +1,21 @@
 class Locomotive
 
-	attr_reader :address, :speed, :direction, :lights
+	attr_reader :address, :protocol, :speed_steps, :speed, :direction, :lights
 
 	def initialize(railway, address)
 		@railway = railway
 		@address = address
 		@interface = @railway.register_locomotive(self)
 
+		configuration = @interface.locomotive_configuration(@address)
+		@protocol = configuration[:protocol]
+		@speed_steps = configuration[:speed_steps]
+
 		@speed = 0
 		@direction = :forward
 		@lights = false
+
+		self.update_from_status
 	end
 
 	def options=(options)
@@ -34,7 +40,18 @@ class Locomotive
 		self.update
 	end
 
+	def to_s
+		"Locomotive ##{@address}: protocol: #{@protocol}, speed steps: #{@speed_steps}, speed: #{@speed}, direction: #{@direction}, lights: #{@lights}"
+	end
+
 	protected
+
+	def update_from_status
+		status = @interface.locomotive_status(@address)
+		@speed = status[:speed]
+		@direction = status[:direction]
+		@lights = status[:lights]
+	end
 
 	def update
 		@interface.locomotive(@address, @speed, @direction, @lights)
