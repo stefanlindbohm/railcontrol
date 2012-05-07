@@ -1,10 +1,15 @@
+GIT
+  remote: git://github.com/tomstokes/ruby-serialport.git
+  revision: 43bb3c55cd3197238bbd4e5d8deda3e4535b86c6
+  specs:
+    serialport (1.1.0)
+
 GEM
   remote: http://rubygems.org/
   specs:
-    serialport (1.0.4)
 
 PLATFORMS
   ruby
 
 DEPENDENCIES
-  serialport
+  serialport!

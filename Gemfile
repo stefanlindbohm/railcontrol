@@ -1,3 +1,3 @@
 source :rubygems
 
-gem "serialport"
+gem "serialport", :git => "git://github.com/tomstokes/ruby-serialport.git"

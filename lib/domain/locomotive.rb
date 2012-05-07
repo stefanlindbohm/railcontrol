@@ -15,45 +15,45 @@ class Locomotive
 		@direction = :forward
 		@lights = false
 
-		self.update_from_status
+		self.update_status(@interface.locomotive_status(@address))
 	end
 
 	def options=(options)
 		@speed = options[:speed] if (options.has_key?(:speed))
 		@direction = options[:direction] == :reverse ? :reverse : :forward if (options.has_key?(:direction))
 		@lights = options[:lights] == true ? true : false if (options.has_key?(:lights))
-		self.update
+		self.commit
 	end
 
 	def speed=(speed)
 		@speed = speed
-		self.update
+		self.commit
 	end
 
 	def direction=(direction)
 		@direction = direction == :reverse ? :reverse : :forward
-		self.update
+		self.commit
 	end
 
 	def lights=(lights)
 		@lights = lights == true ? true : false
-		self.update
+		self.commit
+	end
+
+	def update_status(status)
+		@speed = status[:speed]
+		@direction = status[:direction]
+		@lights = status[:lights]
+		puts self.to_s
 	end
 
 	def to_s
-		"Locomotive ##{@address}: protocol: #{@protocol}, speed steps: #{@speed_steps}, speed: #{@speed}, direction: #{@direction}, lights: #{@lights}"
+		"Locomotive ##{@address}: protocol=#{@protocol}, speed steps=#{@speed_steps}, speed=#{@speed}, direction=#{@direction}, lights=#{@lights}"
 	end
 
 	protected
 
-	def update_from_status
-		status = @interface.locomotive_status(@address)
-		@speed = status[:speed]
-		@direction = status[:direction]
-		@lights = status[:lights]
-	end
-
-	def update
+	def commit
 		@interface.locomotive(@address, @speed, @direction, @lights)
 	end
 
