@@ -9,35 +9,47 @@ class P50XInterface
 		@port.read_timeout = 100
 		@delegate = delegate
 		@sensors = []
-		@running = true
+		@last_turnout_commit = nil
+		@port_mutex = Mutex.new
 		self.update_all_sensors
+		@running = true
+		@event_thread = Thread.new do
+			self.event_run
+		end
 	end
 
 	def event_run
 		while (@running)
-
+			self.process_events
+			sleep(0.1)
 		end
 	end
 
 	def close
 		@running = false
-		# wait for event thread to stop
+		@event_thread.join
 		@port.close
 	end
 
 	def start
-		self.write("X\xA7")
-		self.read(1)
+		@port_mutex.synchronize do
+			self.write("X\xA7")
+			self.read(1)
+		end
 	end
 
 	def stop
-		self.write("X\xA6")
-		self.read(1)
+		@port_mutex.synchronize do
+			self.write("X\xA6")
+			self.read(1)
+		end
 	end
 
 	def halt
-		self.write("X\xA5")
-		self.read(1)
+		@port_mutex.synchronize do
+			self.write("X\xA5")
+			self.read(1)
+		end
 	end
 
 	def locomotive(address, speed, direction, lights)
@@ -52,14 +64,19 @@ class P50XInterface
 		option_bits |= 0x40 # force even when controlled elsewhere
 		#option_bits |= 0x80 # should be set it any of f1-f4 is to be changed
 
-		self.write("X\x80" << address_bytes[0] << address_bytes[1] << speed << option_bits)
-		self.read(1)
+		@port_mutex.synchronize do
+			self.write("X\x80" << address_bytes[0] << address_bytes[1] << speed << option_bits)
+			self.read(1)
+		end
 	end
 
 	def locomotive_status(address)
 		address_bytes = locomotive_address_bytes(address)
-		self.write("X\x84" << address_bytes[0] << address_bytes[1])
-		status = self.read_unless_initial_error_byte(4)
+		status = nil
+		@port_mutex.synchronize do
+			self.write("X\x84" << address_bytes[0] << address_bytes[1])
+			status = self.read_unless_initial_error_byte(4)
+		end
 		return { } if (status[0] > 0)
 		{
 			speed:     status[1],
@@ -71,14 +88,19 @@ class P50XInterface
 	def locomotive_dispatch(address)
 		# i've got no idea what effect this has
 		address_bytes = locomotive_address_bytes(address)
-		self.write("X\x83" << address_bytes[0] << address_bytes[1])
-		self.read(1)
+		@port_mutex.synchronize do
+			self.write("X\x83" << address_bytes[0] << address_bytes[1])
+			self.read(1)
+		end
 	end
 
 	def locomotive_configuration(address)
 		address_bytes = locomotive_address_bytes(address)
-		self.write("X\x85" << address_bytes[0] << address_bytes[1])
-		response = self.read_unless_initial_error_byte(5)
+		response = nil
+		@port_mutex.synchronize do
+			self.write("X\x85" << address_bytes[0] << address_bytes[1])
+			response = self.read_unless_initial_error_byte(5)
+		end
 		return { } if (response[0] > 0)
 		protocol = case response[1]
 		    when 0
@@ -96,20 +118,38 @@ class P50XInterface
 		}
 	end
 
-	def turnout(address, color, active)
-		address_bytes = turnout_address_bytes(address)
-		second_byte = address_bytes[1]
-		second_byte |= 0x40 if (active)
-		second_byte |= 0x80 if (color == :green)
+	def turnout(address, color)
+		if (@last_turnout_commit)
+			delta = Time.new - @last_turnout_commit
+			if (delta < 0.2)
+				sleep(0.2 - delta)
+			end
+		end
 
-		self.write("X\x90" << address_bytes[0] << second_byte)
-		self.read(1)
+		address_bytes = turnout_address_bytes(address)
+		first_second_byte = address_bytes[1]
+		first_second_byte |= 0x40
+		first_second_byte |= 0x80 if (color == :green)
+		second_second_byte = address_bytes[1]
+		second_second_byte |= 0x80 if (color == :green)
+
+		@port_mutex.synchronize do
+			self.write("X\x90" << address_bytes[0] << first_second_byte)
+			self.read(1)
+			self.write("X\x90" << address_bytes[0] << second_second_byte)
+			self.read(1)
+		end
+
+		@last_turnout_commit = Time.new
 	end
 
 	def turnout_status(address)
 		address_bytes = turnout_address_bytes(address)
-		self.write("x\x94" << address_bytes[0] << address_bytes[1])
-		status = self.read_unless_initial_error_byte(2)
+		status = nil
+		@port_mutex.synchronize do
+			self.write("x\x94" << address_bytes[0] << address_bytes[1])
+			status = self.read_unless_initial_error_byte(2)
+		end
 		return { } if status[0] > 0
 		{
 			color: status[1] & 0x04 == 0x04 ? :green : :red
@@ -123,8 +163,11 @@ class P50XInterface
 	end
 
 	def status
-		self.write("X\xA2")
-		status = self.read(1)
+		status = nil
+		@port_mutex.synchronize do
+			self.write("X\xA2")
+			status = self.read(1)
+		end
 		{
 			stop:                 status & 0x01 == 0x01,
 			go:                   status & 0x02 == 0x02,
@@ -138,23 +181,27 @@ class P50XInterface
 
 	def update_all_sensors
 		@sensors.clear
-		self.write("X\x99")
-		self.read(1)
+		@port_mutex.synchronize do
+			self.write("X\x99")
+			self.read(1)
+		end
 		self.process_sensor_events
 	end
 
 	def process_events
-		self.write("X\xC8")
 		response = []
-		done = false
-		while (!done)
-			data = @port.read
-			if (data.length > 0)
-				data.each_byte do |byte|
-					response.push(byte)
-					unless (byte & 0x80 == 0x80)
-						done = true
-						break
+		@port_mutex.synchronize do
+			self.write("X\xC8")
+			done = false
+			while (!done)
+				data = @port.sysread(1)
+				if (data.length > 0)
+					data.each_byte do |byte|
+						response.push(byte)
+						unless (byte & 0x80 == 0x80)
+							done = true
+							break
+						end
 					end
 				end
 			end
@@ -220,8 +267,12 @@ class P50XInterface
 	end
 
 	def process_locomotive_events
-		self.write("X\xC9")
-		self.read_iterative(0x80, 5).each do |locomotive_bytes|
+		response = nil
+		@port_mutex.synchronize do
+			self.write("X\xC9")
+			response = self.read_iterative(0x80, 5)
+		end
+		response.each do |locomotive_bytes|
 			address = (locomotive_bytes[3] & 0b111111) << 8 | locomotive_bytes[2]
 			status = {
 				speed:     locomotive_bytes[0],
@@ -233,8 +284,12 @@ class P50XInterface
 	end
 
 	def process_turnout_events
-		self.write("X\xCA")
-		self.read_counted(2).each do |turnout_bytes|
+		response = nil
+		@port_mutex.synchronize do
+			self.write("X\xCA")
+			response = self.read_counted(2)
+		end
+		response.each do |turnout_bytes|
 			address = (turnout_bytes[1] & 0b111) << 8 | turnout_bytes[0]
 			status = {
 				address: address,
@@ -246,8 +301,12 @@ class P50XInterface
 	end
 
 	def process_sensor_events
-		self.write("X\xCB")
-		self.read_iterative(0, 3).each do |group_bytes|
+		response = nil
+		@port_mutex.synchronize do
+			self.write("X\xCB")
+			response = self.read_iterative(0, 3)
+		end
+		response.each do |group_bytes|
 			group_address = group_bytes[0]
 			status_bytes = [ group_bytes[1], group_bytes[2] ]
 			start_address = (group_address - 1) * 16
@@ -261,7 +320,7 @@ class P50XInterface
 						status = {
 							active: state
 						}
-						@delegate.handle_sensor_event(address, status) if @delegate.respond_to?(:handle_sensor_event)
+						@delegate.handle_sensor_event(address + 1, status) if @delegate.respond_to?(:handle_sensor_event)
 					end
 					@sensors[address] = state
 				end
@@ -282,7 +341,7 @@ class P50XInterface
 		response = []
 		return response if length <= 0
 		while (response.length < length)
-			data = @port.read
+			data = @port.sysread(1)
 			if (data.length > 0)
 				data.each_byte do |byte|
 					response.push(byte)
@@ -296,7 +355,7 @@ class P50XInterface
 		response = []
 		return response if length <= 0
 		while (response.length < length)
-			data = @port.read
+			data = @port.sysread(1)
 			if (data.length > 0)
 				data.each_byte do |byte|
 					response.push(byte)
@@ -314,7 +373,7 @@ class P50XInterface
 		current_element = nil
 		done = false
 		while (!done)
-			data = @port.read
+			data = @port.sysread(1)
 			if (data.length > 0)
 				data.each_byte do |byte|
 					if ((current_element.nil? || current_element.length == 0) && byte == stop_byte)
@@ -339,7 +398,7 @@ class P50XInterface
 		current_element = nil
 		done = false
 		while (!done)
-			data = @port.read
+			data = @port.sysread(1)
 			if (data.length > 0)
 				data.each_byte do |byte|
 					if (length.nil?)

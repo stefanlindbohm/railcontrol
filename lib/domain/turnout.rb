@@ -8,7 +8,8 @@ class Turnout
 		@color = :green
 		@interface = @railway.register_turnout(self)
 
-		self.update_status(@interface.turnout_status(@address))
+		initial_status = @interface.turnout_status(@address)
+		@color = initial_status[:color]
 	end
 
 	def toggle
@@ -16,13 +17,15 @@ class Turnout
 	end
 
 	def color=(color)
+		change = @color != color
 		@color = color == :green ? :green : :red
-		self.commit
+		self.commit if (change)
 	end
 
 	def update_status(status)
+		change = @color != status[:color]
 		@color = status[:color]
-		puts self.to_s
+		self.handle_change(true) if (change)
 	end
 
 	def to_s
@@ -32,7 +35,16 @@ class Turnout
 	protected
 
 	def commit
-		@interface.turnout(@address, @color, true)
-		@interface.turnout(@address, @color, false)
+		@interface.turnout(@address, @color)
+		self.handle_change(false)
 	end
+
+	def handle_change(external)
+		if (external)
+			puts "External change: #{self.to_s}"
+		else
+			puts "Internal change: #{self.to_s}"
+		end
+	end
+
 end

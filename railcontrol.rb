@@ -9,12 +9,17 @@ steam_loco = Locomotive.new(railway, 78)
 sj_loco = Locomotive.new(railway, 36)
 turnout1 = Turnout.new(railway, 1)
 turnout2 = Turnout.new(railway, 2)
+sensor1 = Sensor.new(railway, 1)
+sensor2 = Sensor.new(railway, 2)
 
 #interface.locomotive(78, 0, :forward, false)
 puts steam_loco
 puts sj_loco
 puts turnout1
 puts turnout2
+puts sensor1
+puts sensor2
+
 
 #puts interface.sensor_status(1)
 
@@ -25,9 +30,16 @@ puts turnout2
 #	sleep(0.2)
 #end
 
-600.times do
-	interface.process_events
-	sleep(0.1)
-end
+
+#t = Thread.new do
+#	600.times do
+#		interface.process_events
+#		sleep(0.1)
+#	end
+#end
+
+#t.join
+
+sleep(20)
 
 interface.close

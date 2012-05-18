@@ -15,7 +15,10 @@ class Locomotive
 		@direction = :forward
 		@lights = false
 
-		self.update_status(@interface.locomotive_status(@address))
+		initial_status = @interface.locomotive_status(@address)
+		@speed = initial_status[:speed]
+		@direction = initial_status[:direction]
+		@lights = initial_status[:lights]
 	end
 
 	def options=(options)
@@ -26,25 +29,29 @@ class Locomotive
 	end
 
 	def speed=(speed)
+		change = @speed != speed
 		@speed = speed
-		self.commit
+		self.commit if (change)
 	end
 
 	def direction=(direction)
+		change = @direction != direction
 		@direction = direction == :reverse ? :reverse : :forward
-		self.commit
+		self.commit if (change)
 	end
 
 	def lights=(lights)
+		change = @lights != lights
 		@lights = lights == true ? true : false
-		self.commit
+		self.commit if (change)
 	end
 
 	def update_status(status)
+		change = @speed != status[:speed] || @direction != status[:direction] || @lights != status[:lights]
 		@speed = status[:speed]
 		@direction = status[:direction]
 		@lights = status[:lights]
-		puts self.to_s
+		self.handle_change(true) if (change)
 	end
 
 	def to_s
@@ -55,6 +62,15 @@ class Locomotive
 
 	def commit
 		@interface.locomotive(@address, @speed, @direction, @lights)
+		self.handle_change(false)
+	end
+
+	def handle_change(external)
+		if (external)
+			puts "External change: #{self.to_s}"
+		else
+			puts "Internal change: #{self.to_s}"
+		end
 	end
 
 end
